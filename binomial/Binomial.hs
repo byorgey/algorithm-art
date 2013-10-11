@@ -111,12 +111,24 @@ toForest (I t f) = Just (toTree t) : toForest f
 drawTree t
   = renderTree (const (circle 1 # fc black))
                (~~)
-               (symmLayout' with { slHSep = 4, slVSep = 4 } t)
+               (symmLayout' with { slHSep = treeSize, slVSep = treeSize } t)
    # lw 0.03
-   # centerXY # pad 1.1
+   # centerX
+   <> strutX (treeSize * 2)
 
-drawForest = hcat' with {sep = 1} . map (maybe (circle 2 # fc yellow) drawTree)
+treeSize = 4
+
+drawForest
+  = hcat' with {sep = 1}
+  . map (\(w, t) -> maybe (strutX (treeSize * w)) drawTree t)
+  . zip (2 : 2 : iterate (*2) 2)
 
 trees = iterate (insert ()) Nil
 
-main = defaultMain (vcat' with {sep = 1} . map (drawForest . toForest) . take 32 $ trees)
+dia
+  = vcat' with {sep = 1}
+  . map (drawForest . toForest)
+  . take 32
+  $ trees
+
+main = defaultMain (dia # centerXY # pad 1.1)
