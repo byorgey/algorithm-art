@@ -119,7 +119,9 @@ drawTree t
 treeSize = 4
 
 drawForest
-  = hcat' with {sep = 1}
+  = alignR
+  . hcat' with {sep = 1}
+  . reverse
   . map (\(w, t) -> maybe (strutX (treeSize * w)) drawTree t)
   . zip (2 : 2 : iterate (*2) 2)
 
@@ -132,3 +134,8 @@ dia
   $ trees
 
 main = defaultMain (dia # centerXY # pad 1.1)
+
+-- to do:
+--   * draw binomial trees in right-leaning style?
+--   * use Char data in trees and show with color
+--   * visualize mergeForest operation
