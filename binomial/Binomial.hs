@@ -108,32 +108,53 @@ toForest Nil     = []
 toForest (O f)   = Nothing : toForest f
 toForest (I t f) = Just (toTree t) : toForest f
 
-drawTree t
-  = renderTree (const (circle 1 # fc black))
-               (~~)
-               (symmLayout' with { slHSep = treeSize, slVSep = treeSize } t)
-   # lw 0.03
-   # centerX
-   <> strutX (treeSize * 2)
+drawNode :: Int -> D
+drawNode n
+  = iterate (+0.3) 0.5
+  # take n
+  # map circle
+  # mconcat
+
+drawTree :: Tree Int -> D
+drawTree (Node n ts)
+    = vcat' with {sep = treeSize}
+    [ drawNode n # setEnvelope mempty
+    , children
+    ]
+    # withNameAll () (atop . mconcat . map ((origin ~~) . location))
+    # localize
+  where
+    children
+      = ts
+      # map (named () . drawTree)
+      # reverse
+      # cat' unit_X with {sep = treeSize}
+
+-- drawTree t
+--   = renderTree (const (circle 1 # fc black))
+--                (~~)
+--                (symmLayout' with { slHSep = treeSize, slVSep = treeSize } t)
+--    # lw 0.03
+--    # centerX
+--    <> strutX (treeSize * 2)
 
 treeSize = 4
 
 drawForest
   = alignR
-  . hcat' with {sep = 1}
+  . hcat
   . reverse
-  . map (\(w, t) -> maybe (strutX (treeSize * w)) drawTree t)
-  . zip (2 : 2 : iterate (*2) 2)
+  . map (\(w, t) -> maybe mempty (centerX . drawTree) t <> strutX (w * treeSize))
+  . zip (1 : iterate (*2) 1)
 
-trees = iterate (insert ()) Nil
+trees = scanr insert Nil [1,3,5,4,4,5,2,3,1,3,3,2,2,3,1,4,5,2,3,4,1,5]
 
 dia
-  = vcat' with {sep = 1}
+  = vcat' with {sep = treeSize}
   . map (drawForest . toForest)
-  . take 32
   $ trees
 
-main = defaultMain (dia # centerXY # pad 1.1)
+main = defaultMain (dia # centerXY # sized (Width 4) # pad 1.1)
 
 -- to do:
 --   * draw binomial trees in right-leaning style?
