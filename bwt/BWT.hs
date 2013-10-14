@@ -63,17 +63,41 @@ acolor i = cs !! (abs i `mod` l)
     cs = [red, orange, yellow, green, blue, purple]
 
 d :: D
-d = hcat' def { sep = 0.1 } $ map centerXY
-    [ reflectX $ block rs  -- Rotations of s
-    , sorting
-    , block rs' -- sorted rotations of s
-    ]
+d = inputToBWT === strutY 1 === bwtToInput 
   where
+    inputToBWT = hcat' def { sep = 0.1 } $ map centerXY
+      [ reflectX $ block rs  -- Rotations of s
+      , sorting head rs rs'
+      , block rs' -- sorted rotations of s
+      ]
+
+    bwtToInput = hcat' def { sep = 0.1 } $ map centerXY
+     [ reflectX $ block [[a,b] | (a,b) <- zip p [1..]]                      -- spl table
+     , sorting fst (zip p [1..]) (sortby (<=) (zip p [1..]))
+     , block [[a,b,i] | (i,(a,b)) <- zip [1..] $ sortby (<=) (zip p [1..])] -- continued
+     , threads n p
+     ]
+
+    threads n p =   alignL ((reflectY $ hcat $ take (length p * 2 - 1) ds))
+                === alignL (hcat' def { sep = 5+2.1 } (map (alphabet . snd) is))
+      where
+        (is,ds) = mconcat [ ([(i,x)],
+                              [ moveTo (0 & (fromIntegral i * 2.1)) (centerXY (block [[x,j]]))
+                              , connect i j
+                              ])
+                     | (i,x,j) <- ts
+                     ]
+        ts = take (length p) (thread n (spl n))
+        thread i (x,j) = (i,x,j) : thread j (spl j)
+        spl t = fromJust $ lookup t (zip [1..] (sortby (<=) (zip p [1..])))
+
+
+
     row = hcat' def { sep = 0.1 }
     block = vcat' def { sep = 0.1 } . map (row . map alphabet)
 
-    sorting = reflectY $ mconcat 
-            [ connect i j # lc (acolor $ head r)
+    sorting f rs rs' = reflectY $ mconcat 
+            [ connect i j # lc (acolor (f r))
             | (i,r) <- zip [0..] rs
             , let j = fromJust . findIndex (== r) $ rs'
             ]
@@ -86,6 +110,8 @@ d = hcat' def { sep = 0.1 } $ map centerXY
     rs' = lexsort rs
 
     s = map ((subtract (ord '0')) . ord) "101103107109113" -- This should be something more meaningful
+    (n,p) = bwt s
+
 
 bez a b c d = trailLike $ (fromSegments [bezier3 (b .-. a) (c .-. a) (d .-. a)]) `at` a
 
