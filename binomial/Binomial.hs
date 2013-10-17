@@ -9,6 +9,7 @@ import           Diagrams.Backend.SVG.CmdLine
 import           Diagrams.Prelude             hiding (D)
 
 import           Data.List                    (find)
+import           Data.Maybe                   (fromMaybe)
 import           Data.Tree                    (Tree (..))
 
 -- Taken from Louis Wasserman, "Playing with Priority Queues",
@@ -111,54 +112,63 @@ insert a h = incrForest (BinomTree a Zero) h
 -- Dissected variant of binomial forest merge, for visualizing the
 -- process
 
--- | Are we going down the call tree (with some inputs) or up (with an
---   output)?
+-- | The current function call.
 data Call rank a
-  = CallMerge (BinomForest rank a) (BinomForest rank a)
+  = CallMerge (BinomForest rank a) (BinomForest rank a)  -- calling mergeForest
   | CallCarry (BinomTree rank a) (BinomForest rank a) (BinomForest rank a)
-  | Result (BinomForest rank a)
+                                                         -- calling carryForest
+  | Result (BinomForest rank a)                          -- returning up the tree with a result
   deriving (Eq)
 
+-- | The current \"call stack\", i.e. what we need to compute while
+-- unwinding the recursion.
 data CallStack rank a where
-  Top    :: CallStack Zero a
-  MergeO :: CallStack rank a -> CallStack (Succ rank) a
-  MergeI :: BinomTree rank a -> CallStack rank a -> CallStack (Succ rank) a
-  MergeOCarry :: CallStack rank a -> CallStack (Succ rank) a
-  CarryMerge :: CallStack rank a -> CallStack rank a
-  CarryCarry :: BinomTree rank a -> CallStack rank a -> CallStack (Succ rank) a
+  Top  :: CallStack Zero a  -- top of the stack.
+  AddO :: RankToForest rank
+       => Maybe (BinomTree rank a)   -- trees that were added, resulting in 0 bit
+       -> Maybe (BinomTree rank a)
+       -> CallStack rank a           -- rest of the call stack
+       -> CallStack (Succ rank) a
+  AddI :: RankToForest rank
+       => Maybe (BinomTree rank a)   -- trees that were added...
+       -> Maybe (BinomTree rank a)
+       -> BinomTree rank a           -- resulting in this tree
+       -> CallStack rank a           -- rest of the call stack
+       -> CallStack (Succ rank) a
 
+-- | A frozen snapshot of some intermediate state in the merge
+--   algorithm, with a current function call and a call stack.
 data MergeState a where
-  MS :: Call rank a
+  MS :: RankToForest rank
+     => Call rank a
      -> CallStack rank a
      -> MergeState a
 
+-- | Perform one small step from a MergeState to the next.
 mergeForest' :: Ord a => MergeState a -> MergeState a
 mergeForest' (MS (CallMerge Nil ts2) stk) = MS (Result ts2) stk
 mergeForest' (MS (CallMerge ts1 Nil) stk) = MS (Result ts1) stk
 mergeForest' (MS (CallMerge (O ts1') (O ts2')) stk)
-  = MS (CallMerge ts1' ts2') (MergeO stk)
+  = MS (CallMerge ts1' ts2') (AddO Nothing Nothing stk)
 mergeForest' (MS (CallMerge (O ts1') (I t2 ts2')) stk)
-  = MS (CallMerge ts1' ts2') (MergeI t2 stk)
+  = MS (CallMerge ts1' ts2') (AddI Nothing (Just t2) t2 stk)
 mergeForest' (MS (CallMerge (I t1 ts1') (O ts2')) stk)
-  = MS (CallMerge ts1' ts2') (MergeI t1 stk)
+  = MS (CallMerge ts1' ts2') (AddI (Just t1) Nothing t1 stk)
 mergeForest' (MS (CallMerge (I t1 ts1') (I t2 ts2')) stk)
-  = MS (CallCarry (t1 /\ t2) ts1' ts2') (MergeOCarry stk)
+  = MS (CallCarry (t1 /\ t2) ts1' ts2') (AddO (Just t1) (Just t2) stk)
 mergeForest' (MS (CallCarry t0 Nil ts2) stk)
   = MS (Result (incrForest t0 ts2)) stk
 mergeForest' (MS (CallCarry t0 ts1 Nil) stk)
   = MS (Result (incrForest t0 ts1)) stk
 mergeForest' (MS (CallCarry t0 (O ts1') ts2) stk)
-  = MS (CallMerge (I t0 ts1') ts2) (CarryMerge stk)
+  = MS (CallMerge (I t0 ts1') ts2) stk
 mergeForest' (MS (CallCarry t0 ts1 (O ts2')) stk)
-  = MS (CallMerge ts1 (I t0 ts2')) (CarryMerge stk)
+  = MS (CallMerge ts1 (I t0 ts2')) stk
 mergeForest' (MS (CallCarry t0 (I t1 ts1') (I t2 ts2')) stk)
-  = MS (CallCarry (t1 /\ t2) ts1' ts2') (CarryCarry t0 stk)
+  = MS (CallCarry (t1 /\ t2) ts1' ts2') (AddI (Just t1) (Just t2) t0 stk)
 
-mergeForest' (MS (Result f) (MergeO stk)) = MS (Result (O f)) stk
-mergeForest' (MS (Result f) (MergeI t stk)) = MS (Result (I t f)) stk
-mergeForest' (MS (Result f) (MergeOCarry stk)) = MS (Result (O f)) stk
-mergeForest' (MS (Result f) (CarryMerge stk)) = MS (Result f) stk
-mergeForest' (MS (Result f) (CarryCarry t stk)) = MS (Result (I t f)) stk
+mergeForest' (MS (Result f) (AddO _ _ stk)) = MS (Result (O f)) stk
+mergeForest' (MS (Result f) (AddI _ _ t stk)) = MS (Result (I t f)) stk
 
 prop_mergeForest_dissected :: Ord a => BinomHeap a -> BinomHeap a -> Bool
 prop_mergeForest_dissected f1 f2 =
@@ -209,6 +219,9 @@ drawTree (Node n ts)
       # reverse
       # cat' unit_X with {sep = treeSize}
 
+drawBTree :: RankToForest rank => BinomTree rank Int -> D
+drawBTree = drawTree . toTree
+
 -- drawTree t
 --   = renderTree (const (circle 1 # fc black))
 --                (~~)
@@ -228,11 +241,47 @@ drawForest
   . map (\(w, t) -> maybe mempty (centerX . drawTree) t <> strutX (w * treeSize))
   . zip (1 : iterate (*2) 1)
 
-drawMergeState :: MergeState a -> D
-drawMergeState (MS (CallMerge f1 f2) stk) = undefined  -- XXX todo
+type Addition = [Column]
+type Column = [Maybe D]
+
+layoutMergeState :: MergeState Int -> Addition
+layoutMergeState (MS call stk) =
+    layoutCall call ++ layoutStack stk
+
+layoutCall :: RankToForest rank => Call rank Int -> Addition
+layoutCall (CallMerge   f1 f2) = reverse $ layoutForests Nothing f1 f2
+layoutCall (CallCarry t f1 f2) = reverse $ layoutForests (Just t) f1 f2
+
+layoutForests :: RankToForest rank => Maybe (BinomTree rank Int) -> BinomForest rank Int -> BinomForest rank Int -> Addition
+layoutForests Nothing Nil Nil = []
+layoutForests carry Nil Nil = [[drawBTree <$> carry, Nothing, Nothing, Nothing]]
+layoutForests carry f1 f2 = [drawBTree <$> carry, drawBTree <$> t1, drawBTree <$> t2, Nothing] : layoutForests Nothing f1' f2'
+  where (t1, f1') = splitForest f1
+        (t2, f2') = splitForest f2
+
+splitForest :: BinomForest t a -> (Maybe (BinomTree t a), BinomForest (Succ t) a)
+splitForest Nil = (Nothing, Nil)
+splitForest (O f) = (Nothing, f)
+splitForest (I t f) = (Just t, f)
+
+layoutStack :: RankToForest rank => CallStack rank Int -> Addition
+layoutStack Top = []
+layoutStack (AddO t1 t2 stk) = [Nothing, drawBTree <$> t1, drawBTree <$> t2, Nothing] : layoutStack stk
+layoutStack (AddI t1 t2 r stk) = [Nothing, drawBTree <$> t1, drawBTree <$> t2, Just $ drawBTree r] : layoutStack stk
+
+-- blergh, need some grid layout stuff in -lib already!
+drawAddition :: Addition -> D
+drawAddition grid = hcat' with {sep = treeSize} (map (vcat' with {sep = treeSize}) grid')
+  where
+    grid'   = map (zipWith (\h d -> strutY h # alignT <> fromMaybe mempty d) heights) grid
+    heights = foldl1 (zipWith max) (map (map ht) grid)
+    ht = maybe 0 height
+
+drawMergeState :: MergeState Int -> D
+drawMergeState = drawAddition . layoutMergeState
 
 heaps :: [BinomHeap Int]
-heaps = scanr insert Nil [1,3,5,4,4,5,2,3,1,3,3,2,2,3,1,4,5,2,3,4,1,5,1,3,1,2,2,4,4,2,3,4,5,2,2,5,5,4,1,1,1,1,1,1]
+heaps = scanl (flip insert) Nil [1,3,5,4,4,5,2,3,1,3,3,2,2,3,1,4,5,2,3,4,1,5,1,3,1,2,2,4,4,2,3,4,5,2,2,5,5,4,1,1,1,1,1,1]
 
 dia :: D
 dia
@@ -240,8 +289,15 @@ dia
   . map (drawForest . toForest)
   $ heaps
 
+dia2 :: D
+dia2 = drawMergeState (steps !! 4)
+  where
+    steps = iterate mergeForest' (MS (CallMerge f1 f2) Top)
+    f1 = heaps !! 19
+    f2 = heaps !! 20
+
 main :: IO ()
-main = defaultMain (dia # centerXY # sized (Width 4) # pad 1.1)
+main = defaultMain (dia2 # centerXY # sized (Width 4) # pad 1.1)
 
 -- to do:
 --   * use Char data in heaps and show with color
