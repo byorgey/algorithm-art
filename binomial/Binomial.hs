@@ -8,8 +8,7 @@ module Binomial where
 import           Diagrams.Backend.SVG.CmdLine
 import           Diagrams.Prelude             hiding (D)
 
-import           Data.List                    (find)
-import           Data.Maybe                   (fromMaybe)
+import           Data.List                    (find, transpose)
 import           Data.Tree                    (Tree (..))
 
 -- Taken from Louis Wasserman, "Playing with Priority Queues",
@@ -93,10 +92,11 @@ carryForest
   => BinomTree rank a -> BinomForest rank a -> BinomForest rank a
   -> BinomForest rank a
 carryForest t0 ts1 ts2 = case (ts1, ts2) of
-  (Nil, _)    -> incrForest t0 ts2
-  (_, Nil)    -> incrForest t0 ts1
-  (O ts1', _) -> mergeForest (I t0 ts1') ts2
-  (_, O ts2') -> mergeForest ts1 (I t0 ts2')
+  (Nil, _)               -> incrForest t0 ts2
+  (_, Nil)               -> incrForest t0 ts1
+  (O ts1', O ts2')       -> I t0 (mergeForest ts1' ts2')
+  (O ts1', I t2 ts2')    -> O (carryForest (t0 /\ t2) ts1' ts2')
+  (I t1 ts1', O ts2')    -> O (carryForest (t1 /\ t0) ts1' ts2')
   (I t1 ts1', I t2 ts2') -> I t0 (carryForest (t1 /\ t2) ts1' ts2')
 
 incrForest :: Ord a => BinomTree rank a -> BinomForest rank a -> BinomForest rank a
@@ -160,10 +160,12 @@ mergeForest' (MS (CallCarry t0 Nil ts2) stk)
   = MS (Result (incrForest t0 ts2)) stk
 mergeForest' (MS (CallCarry t0 ts1 Nil) stk)
   = MS (Result (incrForest t0 ts1)) stk
-mergeForest' (MS (CallCarry t0 (O ts1') ts2) stk)
-  = MS (CallMerge (I t0 ts1') ts2) stk
-mergeForest' (MS (CallCarry t0 ts1 (O ts2')) stk)
-  = MS (CallMerge ts1 (I t0 ts2')) stk
+mergeForest' (MS (CallCarry t0 (O ts1') (O ts2')) stk)
+  = MS (CallMerge ts1' ts2') (AddI Nothing Nothing t0 stk)
+mergeForest' (MS (CallCarry t0 (O ts1') (I t2 ts2')) stk)
+  = MS (CallCarry (t0 /\ t2) ts1' ts2') (AddO Nothing (Just t2) stk)
+mergeForest' (MS (CallCarry t0 (I t1 ts1') (O ts2')) stk)
+  = MS (CallCarry (t1 /\ t0) ts1' ts2') (AddO (Just t1) Nothing stk)
 mergeForest' (MS (CallCarry t0 (I t1 ts1') (I t2 ts2')) stk)
   = MS (CallCarry (t1 /\ t2) ts1' ts2') (AddI (Just t1) (Just t2) t0 stk)
 
@@ -241,8 +243,28 @@ drawForest
   . map (\(w, t) -> maybe mempty (centerX . drawTree) t <> strutX (w * treeSize))
   . zip (1 : iterate (*2) 1)
 
+data MBit = Blank | BitO | BitI D
+
+maybeToBit :: MBit -> Maybe D -> MBit
+maybeToBit m Nothing  = m
+maybeToBit _ (Just d) = BitI d
+
+bitToMaybe :: MBit -> Maybe D
+bitToMaybe Blank    = Nothing
+bitToMaybe BitO     = Nothing
+bitToMaybe (BitI d) = Just d
+
+withB, withO :: Maybe D -> MBit
+withB = maybeToBit Blank
+withO = maybeToBit BitO
+
+drawBit :: MBit -> D
+drawBit Blank    = mempty
+drawBit BitO     = square 1 # fc black
+drawBit (BitI d) = d
+
 type Addition = [Column]
-type Column = [Maybe D]
+type Column = [MBit]
 
 layoutMergeState :: MergeState Int -> Addition
 layoutMergeState (MS call stk) =
@@ -254,28 +276,64 @@ layoutCall (CallCarry t f1 f2) = reverse $ layoutForests (Just t) f1 f2
 
 layoutForests :: RankToForest rank => Maybe (BinomTree rank Int) -> BinomForest rank Int -> BinomForest rank Int -> Addition
 layoutForests Nothing Nil Nil = []
-layoutForests carry Nil Nil = [[drawBTree <$> carry, Nothing, Nothing, Nothing]]
-layoutForests carry f1 f2 = [drawBTree <$> carry, drawBTree <$> t1, drawBTree <$> t2, Nothing] : layoutForests Nothing f1' f2'
+layoutForests carry Nil Nil
+  = [ [ Blank
+      , Blank
+      , Blank
+      , withB $ drawBTree <$> carry
+    ] ]
+layoutForests carry f1 f2
+  = [ withB $ drawBTree <$> carry
+    , withO $ drawBTree <$> t1
+    , withO $ drawBTree <$> t2
+    , Blank
+    ]
+    :
+    layoutForests Nothing f1' f2'
   where (t1, f1') = splitForest f1
         (t2, f2') = splitForest f2
 
 splitForest :: BinomForest t a -> (Maybe (BinomTree t a), BinomForest (Succ t) a)
-splitForest Nil = (Nothing, Nil)
-splitForest (O f) = (Nothing, f)
-splitForest (I t f) = (Just t, f)
+splitForest Nil     = (Nothing , Nil)
+splitForest (O f)   = (Nothing , f)
+splitForest (I t f) = (Just t  , f)
 
 layoutStack :: RankToForest rank => CallStack rank Int -> Addition
 layoutStack Top = []
-layoutStack (AddO t1 t2 stk) = [Nothing, drawBTree <$> t1, drawBTree <$> t2, Nothing] : layoutStack stk
-layoutStack (AddI t1 t2 r stk) = [Nothing, drawBTree <$> t1, drawBTree <$> t2, Just $ drawBTree r] : layoutStack stk
+layoutStack (AddO t1 t2 stk)
+  = [ Blank
+    , withO $ drawBTree <$> t1
+    , withO $ drawBTree <$> t2
+    , BitO
+    ]
+    : layoutStack stk
+layoutStack (AddI t1 t2 r stk)
+  = [ Blank
+    , withO $ drawBTree <$> t1
+    , withO $ drawBTree <$> t2
+    , BitI $ drawBTree r
+    ]
+    : layoutStack stk
 
 -- blergh, need some grid layout stuff in -lib already!
 drawAddition :: Addition -> D
-drawAddition grid = hcat' with {sep = treeSize} (map (vcat' with {sep = treeSize}) grid')
+drawAddition grid = grid'
   where
-    grid'   = map (zipWith (\h d -> strutY h # alignT <> fromMaybe mempty d) heights) grid
+    grid'   = grid
+            # map (map (centerX . drawBit))
+            # map (zipWith scale (0.5 : repeat 1))
+            # reverse
+            # zipWith (\w -> map (strutX w <>)) (treeSize : iterate (*2) treeSize)
+            # reverse
+            # map (zipWith (\h -> (strutY h # alignT <>)) heights)
+            # transpose
+            # map (alignR . hcat' with {sep = treeSize})
+            # (\rows@[carries, add1, add2, res] ->
+                 vcat' with {sep = treeSize}
+                   [carries, add1, add2, hrule (maximum . map width $ rows) # alignR, res]
+              )
     heights = foldl1 (zipWith max) (map (map ht) grid)
-    ht = maybe 0 height
+    ht = maybe 0 height . bitToMaybe
 
 drawMergeState :: MergeState Int -> D
 drawMergeState = drawAddition . layoutMergeState
@@ -289,15 +347,19 @@ dia
   . map (drawForest . toForest)
   $ heaps
 
-dia2 :: D
-dia2 = drawMergeState (steps !! 4)
+visualizeMerge :: BinomHeap Int -> BinomHeap Int -> D
+visualizeMerge h1 h2
+    = vcat' with {sep = treeSize * 2}
+    . map drawMergeState
+    . takeWhile notResult
+    $ steps
   where
-    steps = iterate mergeForest' (MS (CallMerge f1 f2) Top)
-    f1 = heaps !! 19
-    f2 = heaps !! 20
+    steps = iterate mergeForest' (MS (CallMerge h1 h2) Top)
+    notResult (MS (Result _) _) = False
+    notResult _ = True
 
 main :: IO ()
-main = defaultMain (dia2 # centerXY # sized (Width 4) # pad 1.1)
+main = defaultMain (visualizeMerge (heaps !! 7) (heaps !! 5) # centerXY # sized (Width 4) # pad 1.1)
 
 -- to do:
 --   * use Char data in heaps and show with color
