@@ -8,8 +8,20 @@ module Binomial where
 import           Diagrams.Backend.SVG.CmdLine
 import           Diagrams.Prelude             hiding (D)
 
+import           Data.Char                    (ord)
 import           Data.List                    (find, transpose)
 import           Data.Tree                    (Tree (..))
+
+class Drawable a where
+  draw :: a -> D
+
+instance Drawable Int where
+  draw n = circle (fromIntegral n * 0.1 + 1) # fc blue
+
+instance Drawable Char where
+  draw x = circle 1 # fc c
+    where c = clist !! (ord x `mod` (length clist))
+          clist = [red, orange, yellow, green, blue, purple, white]
 
 -- Taken from Louis Wasserman, "Playing with Priority Queues",
 -- Monad.Reader Issue 16.
@@ -203,13 +215,10 @@ toForest Nil     = []
 toForest (O f)   = Nothing : toForest f
 toForest (I t f) = Just (toTree t) : toForest f
 
-drawNode :: Int -> D
-drawNode n = circle (fromIntegral n * 0.1 + 1) # fc blue
-
-drawTree :: Tree Int -> D
-drawTree (Node n ts)
+drawTree :: Drawable a => Tree a -> D
+drawTree (Node a ts)
     = vcat' with {sep = treeSize}
-    [ drawNode n # setEnvelope mempty
+    [ draw a # setEnvelope mempty
     , children
     ]
     # withNameAll () (beneath . mconcat . map ((origin ~~) . location))
@@ -221,7 +230,7 @@ drawTree (Node n ts)
       # reverse
       # cat' unit_X with {sep = treeSize}
 
-drawBTree :: RankToForest rank => BinomTree rank Int -> D
+drawBTree :: (Drawable a, RankToForest rank) => BinomTree rank a -> D
 drawBTree = drawTree . toTree
 
 -- drawTree t
@@ -235,7 +244,7 @@ drawBTree = drawTree . toTree
 treeSize :: Num a => a
 treeSize = 4
 
-drawForest :: [Maybe (Tree Int)] -> D
+drawForest :: Drawable a => [Maybe (Tree a)] -> D
 drawForest
   = alignR
   . hcat
@@ -266,15 +275,18 @@ drawBit (BitI d) = d
 type Addition = [Column]
 type Column = [MBit]
 
-layoutMergeState :: MergeState Int -> Addition
+layoutMergeState :: Drawable a => MergeState a -> Addition
 layoutMergeState (MS call stk) =
     layoutCall call ++ layoutStack stk
 
-layoutCall :: RankToForest rank => Call rank Int -> Addition
+layoutCall :: (Drawable a, RankToForest rank) => Call rank a -> Addition
 layoutCall (CallMerge   f1 f2) = reverse $ layoutForests Nothing f1 f2
 layoutCall (CallCarry t f1 f2) = reverse $ layoutForests (Just t) f1 f2
+layoutCall (Result f)          = toResult . reverse $ layoutForests Nothing f Nil
+  where
+    toResult = map (\[c,f1,f2,r] -> [c,r,f2,f1])
 
-layoutForests :: RankToForest rank => Maybe (BinomTree rank Int) -> BinomForest rank Int -> BinomForest rank Int -> Addition
+layoutForests :: (Drawable a, RankToForest rank) => Maybe (BinomTree rank a) -> BinomForest rank a -> BinomForest rank a -> Addition
 layoutForests Nothing Nil Nil = []
 layoutForests carry Nil Nil
   = [ [ Blank
@@ -298,7 +310,7 @@ splitForest Nil     = (Nothing , Nil)
 splitForest (O f)   = (Nothing , f)
 splitForest (I t f) = (Just t  , f)
 
-layoutStack :: RankToForest rank => CallStack rank Int -> Addition
+layoutStack :: (Drawable a, RankToForest rank) => CallStack rank a -> Addition
 layoutStack Top = []
 layoutStack (AddO t1 t2 stk)
   = [ Blank
@@ -319,9 +331,10 @@ layoutStack (AddI t1 t2 r stk)
 drawAddition :: Addition -> D
 drawAddition grid = grid'
   where
-    grid'   = grid
+    grid1   = grid
             # map (map (centerX . drawBit))
             # map (zipWith scale (0.5 : repeat 1))
+    grid'   = grid1
             # reverse
             # zipWith (\w -> map (strutX w <>)) (treeSize : iterate (*2) treeSize)
             # reverse
@@ -332,35 +345,41 @@ drawAddition grid = grid'
                  vcat' with {sep = treeSize}
                    [carries, add1, add2, hrule (maximum . map width $ rows) # alignR, res]
               )
-    heights = foldl1 (zipWith max) (map (map ht) grid)
-    ht = maybe 0 height . bitToMaybe
+    heights = foldl1 (zipWith max) (map (map height) grid1)
 
-drawMergeState :: MergeState Int -> D
+drawMergeState :: Drawable a => MergeState a -> D
 drawMergeState = drawAddition . layoutMergeState
 
-heaps :: [BinomHeap Int]
-heaps = scanl (flip insert) Nil [1,3,5,4,4,5,2,3,1,3,3,2,2,3,1,4,5,2,3,4,1,5,1,3,1,2,2,4,4,2,3,4,5,2,2,5,5,4,1,1,1,1,1,1]
+heaps1 :: [BinomHeap Char]
+heaps1 = scanl (flip insert) Nil "Hello there, this is a visualization of a binomial forest merge operation, which is a more elaborate version of binary addition."
+
+heaps2 :: [BinomHeap Char]
+heaps2 = scanl (flip insert) Nil "Twinkle, twinkle, little star, how I wonder what you are."
 
 dia :: D
 dia
   = vcat' with {sep = treeSize}
   . map (drawForest . toForest)
-  $ heaps
+  $ heaps1
 
-visualizeMerge :: BinomHeap Int -> BinomHeap Int -> D
+visualizeMerge :: (Ord a, Drawable a) => BinomHeap a -> BinomHeap a -> D
 visualizeMerge h1 h2
-    = vcat' with {sep = treeSize * 2}
-    . map drawMergeState
-    . takeWhile notResult
+    = vcat
+    . map (enbox grey treeSize . drawMergeState)
+    . takeUntil isResult
     $ steps
   where
     steps = iterate mergeForest' (MS (CallMerge h1 h2) Top)
-    notResult (MS (Result _) _) = False
-    notResult _ = True
+    isResult (MS (Result _) _) = True
+    isResult _ = False
+    takeUntil _ [] = []
+    takeUntil p (x:xs)
+      | p x = [x]
+      | otherwise = x : takeUntil p xs
+
+enbox :: Colour Double -> Double -> D -> D
+enbox c padding d = centerXY d <> rect (width d + 2*padding) (height d + 2*padding) # lc c
 
 main :: IO ()
-main = defaultMain (visualizeMerge (heaps !! 7) (heaps !! 5) # centerXY # sized (Width 4) # pad 1.1)
+main = defaultMain (visualizeMerge (heaps1 !! 38) (heaps2 !! 19) # centerXY # sized (Width 4) # pad 1.1)
 
--- to do:
---   * use Char data in heaps and show with color
---   * visualize mergeForest operation
