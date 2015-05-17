@@ -47,24 +47,14 @@ unbwt t ys = take (length ys) (thread (spl ys t))
 
 -----------
 
-alphabet' :: Int -> Diagram B
-alphabet' i = c # lc (acolor i) # lwG 0.05 # withEnvelope (circle 1 :: Diagram B)
+alphabet' :: Double -> Int -> Diagram B
+alphabet' w (-1) = square 1 # lc red # lwG w # withEnvelope (circle 1 :: Diagram B)
+alphabet' w i    = c # lc (acolor i) # lwG w
   where
-    l  = length cs
-    cs = [red, orange, yellow, green, blue, purple]
-
-    m  = abs i `mod` 2
-    c  = mconcat [circle (fromIntegral (m + 1 - r) / fromIntegral (m + 1) * (1 + 1/6 - (fromIntegral ((i `mod` 10) `div` 2) + 1) / 6)) | r <- [0..m]]
-
-alphabet :: Int -> Diagram B
-alphabet (-1) = square 1 # lc red # lwG 0.05 # withEnvelope (circle 1 :: Diagram B)
-alphabet i    = c # lc (acolor i) # lwG 0.05
-  where
-    l  = length cs
-    cs = [red, orange, yellow, green, blue, purple]
-
     m  = abs i `mod` 10
     c  = mconcat [circle (fromIntegral (m + 1 - r) / fromIntegral (m + 1)) | r <- [0..m]]
+
+alphabet = alphabet' 0.05
 
 acolor :: Int -> Colour Double
 acolor (-1) = red
@@ -74,111 +64,99 @@ acolor i = cs !! (abs i `mod` l)
     cs = [red, orange, yellow, green, blue, purple]
 
 d :: Diagram B
-d = squared -- horizontal 
+d = squared
   where
-    vsep = 0.1 
+    vsep = 0.1
     hsep = 0.1
 
-{-    sweeping = (sweepLayout (1/2 @@ turn) $ map centerXY
-     [ block rs
-     , sorting 7 head rs rs'
-     , block rs'
-     , bwtToRLE
-     , reflectX bwtToRLE
-     , reflectX $ block [[a,b] | (a,b) <- zip p [1..]]
-     , sorting 7 fst (zip p [1..]) (sortby (<=) (zip p [1..]))
-     , block [[a,b,i] | (i,(a,b)) <- zip [1..] $ sortby (<=) (zip p [1..])]
-     ]) === centerXY (threads n p)
- -}
-    horizontal = hcat' (with & sep .~ 1) $ map centerXY 
-     [ inputToBWT
-     , bwtToRLE
-     , reflectX bwtToRLE
-     , bwtToInput
-     ]
+    vcatSep s = vcat' (with & sep .~ s)
+    hcatSep s = hcat' (with & sep .~ s)
+    hcatSepCenter s = hcatSep s . map centerXY
+    vhcatSep sv sh = vcatSep sv . map (hcatSep sh)
 
-    squared = vcat' (with & sep .~ 2) [ alignL top, translate ((-2) ^& 0) $ alignL bottom ]
+    squared = vcatSep (1.5)
+               [ alignL top
+               , alignL (hcatSep hsep (reverse . map (alphabet' 0.1) $ s))
+               , alignL bottom # translate ((-2-hsep) ^& 0)
+               ]
       where
-        top    = reflectY $ f [ inputToBWT, bwtToRLE ]
-        bottom = rotate (1/2 @@ turn) $ reflectY $ f
-          [ reflectX bwtToRLE
-          , bwtToInput
-          ]
-        f ds = hcat' (with & sep .~ 2) (map centerXY ds)
+        top    =         [ inputToBWT,          bwtToRLE ] # hcatSepCenter 2 # reflectY
+        bottom = reverse [ bwtToInput, reflectX bwtToRLE ] # hcatSepCenter 2 # reflectY
+                                                           # rotate (1/2 @@ turn)
 
-    inputToBWT = hcat' (with & sep .~ hsep) $ map centerXY
-      [ reflectX $ block rs  -- Rotations of s
+    inputToBWT =
+      [ block rs # reflectX    -- Rotations of s
       , sorting 7 head rs rs'
-      , block rs' -- sorted rotations of s
+      , block rs'              -- sorted rotations of s
       ]
+      # hcatSepCenter hsep
 
-    buildUnbwt = hcat' (with & sep .~ hsep) $ map centerXY
-     [ reflectX $ block [[a,b] | (a,b) <- zip p [1..]]           -- spl table
-     , sorting 23.1 fst (zip p [1..]) (sortby (<=) (zip p [1..]))
-     , block [[a,b,i] | (i,(a,b)) <- zip [1..] $ sortby (<=) (zip p [1..])] -- continued
-     ]
-    bwtToInput = hcat' (with & sep .~ 7) $ map alignB [ buildUnbwt, threads n p ]
+    buildUnbwt = 
+      [ block [[a,b] | (a,b) <- ps] # reflectX  -- spl table
+      , sorting 23.1 fst ps ps'
+      , block [[a,b,i] | (i,(a,b)) <- ips]      -- continued
+      , mconcat [ (0 ^& 0) ~~ ((7-(2+2*hsep)+fromIntegral j * (2+hsep)) ^& 0)
+                    # lc (acolor x)
+                    # withEnvelope (strutY 2 :: Diagram B)
+                    # lwG 0.05
+                    # moveTo (0 ^& (fromIntegral (length p - i) * (2+vsep)))
+                | (j,(i,x,_)) <- zip [1..] ts
+                ]
+      ]
+      # hcatSepCenter hsep
 
-    bwtToRLE = vcat' (with & sep .~ vsep) $ map (hcat' (with & sep .~ hsep) . map alphabet) $ groupBy (==) p
+    bwtToInput = [ buildUnbwt, threads n p ] # map alignB # hcatSep 7
 
-    tw = -2
-    threads n p =   alignL (hcat' (with & sep .~ tw+2+hsep) (map (alphabet . snd) is)) 
-                === alignL ((reflectY $ hcat' (with & sep .~ tw) $ take (length p * 2 - 1) ds))
+    bwtToRLE = block . groupBy (==) $ p
+
+    threads n p = vcatSep (-1)
+                    [ alignL (hcatSep hsep (map (alphabet . snd) is)) -- map snd is ~ s
+                    , alignL (reflectY $ hcatSep (-2) $ take (length p * 2 - 1) ds)
+                    ]
       where
         (is,ds) = mconcat [ ([(i,x)],
                               [ moveTo (0 ^& (fromIntegral i * (2+vsep))) (centerXY (block [[x,j]]))
---                              , connect tw i j
+                              , connectW 2 i j # lc (acolor j)
                               ])
-                     | (i,x,j) <- ts
-                     ]
-        ts = take (length p) (thread n (spl n))
-        thread i (x,j) = (i,x,j) : thread j (spl j)
-        spl t = fromJust $ lookup t (zip [1..] (sortby (<=) (zip p [1..])))
+                          | (i,x,j) <- ts
+                          ]
 
-    
+    row = hcatSep hsep
+    block = vhcatSep hsep vsep . map (map alphabet)
 
-    row = hcat' (with & sep .~ hsep)
-    block = vcat' (with & sep .~ vsep) . map (row . map alphabet)
-
-    sorting w f rs rs' = reflectY $ mconcat 
-            [ connect w i j # lc (acolor (f r))
+    sorting w f rs rs' = reflectY $ mconcat
+            [ connectH w i j # lc (acolor (f r))
             | (i,r) <- zip [0..] rs
             , let j = fromJust . findIndex (== r) $ rs'
             ]
---    connect i j = (0 ^& f i) ~~ (5 ^& f j) # lwG 0.2
-    connect w i j = bez (0 ^& f i) (w*2/5 ^& f i) (w*3/5 ^& f j) (w ^& f j) # lwG 0.05
+    connectH w i j = bez (0 ^& f i) (w*2/5 ^& f i) (w*3/5 ^& f j) (w ^& f j) # lwG 0.05
       where
+        f x = fromIntegral x * (2+vsep)
+
+    connectW w i j
+      | abs (i - j) < 2 = strutX w
+      | otherwise
+        = bez (0 ^& (f i + y)) (0 ^& (f i + d*2/5)) (w ^& (f j - d*3/5)) (w ^& (f j - y)) # lwG 0.05
+      where
+        d = f j - f i
+        y = signum d
         f x = fromIntegral x * (2+vsep)
 
     rs  = rots s
     rs' = lexsort rs
 
-    s = (-1) : map ((subtract (ord '0')) . ord) "101103107109113" -- This should be something more meaningful
+    s = (-1) : map ((subtract (ord '0')) . ord) "101103107109113"
     (n,p) = bwt s
+    ps  = zip p [1..]
+    ps' = sortby (<=) ps
+    ips = zip [1..] ps'
+    spl t = fromJust $ lookup t ips
+    thread i (x,j) = (i,x,j) : thread j (spl j)
+    ts = take (length p) (thread n (spl n))
 
-{-
-sweepLayout sweep ds = mconcat $ zipWith f ds (scanl (+) 0 ts)
-  where
-    f d t = d # rotate (1/4 @@ turn) # alignL # moveTo (r ^& 0) # rotate t
-
-    r = total / (tau * getTurn sweep)
-    l = fromIntegral $ length ds
-    bbs = map boundingBox ds
-    ws' = map (fst . unr2 . boxExtents) bbs
-    wh = head ws'
-    wl = last ws'
-    ws = (wh / 2) : ((zipWith ave<*>tail) (drop 1 . take (length ds - 2) $ ws')) ++ [wl / 2]
-    ave a b = (a + b) / 2
-    total = sum ws
-    ts = map ((/(total @@ turn)) . (*sweep) . Turn) ws
--}
 bez a b c d = trailLike $ (fromSegments [bezier3 (b .-. a) (c .-. a) (d .-. a)]) `at` a
 
-d' :: Diagram B
-d' = vcat' (with & sep .~ 0.1) (map alphabet [0..10])
-
 main = defaultMain (d # centerXY # pad 1.1)
--- main = defaultMain (sweepLayout (Turn 1/2) (map square [1,2,4,3,2,3,2,1,2]) # centerXY # pad 1.1)
 
 -----------------------------------
 
