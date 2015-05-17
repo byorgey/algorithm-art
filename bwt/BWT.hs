@@ -1,11 +1,11 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
 module BWT where
 
-import Diagrams.Prelude hiding (D)
+import Diagrams.Prelude
 import Diagrams.Backend.SVG.CmdLine
 import Diagrams.Coordinates
 
-import Test.QuickCheck
+import Test.QuickCheck hiding ((===))
 
 import Data.Char
 import Data.List hiding (sort)
@@ -47,10 +47,8 @@ unbwt t ys = take (length ys) (thread (spl ys t))
 
 -----------
 
-type D = Diagram SVG R2
-
-alphabet' :: Int -> D
-alphabet' i = c # lc (acolor i) # lw 0.05 # withEnvelope (circle 1 :: D)
+alphabet' :: Int -> Diagram B
+alphabet' i = c # lc (acolor i) # lwG 0.05 # withEnvelope (circle 1 :: Diagram B)
   where
     l  = length cs
     cs = [red, orange, yellow, green, blue, purple]
@@ -58,9 +56,9 @@ alphabet' i = c # lc (acolor i) # lw 0.05 # withEnvelope (circle 1 :: D)
     m  = abs i `mod` 2
     c  = mconcat [circle (fromIntegral (m + 1 - r) / fromIntegral (m + 1) * (1 + 1/6 - (fromIntegral ((i `mod` 10) `div` 2) + 1) / 6)) | r <- [0..m]]
 
-alphabet :: Int -> D
-alphabet (-1) = square 1 # lc red # lw 0.05 # withEnvelope (circle 1 :: D)
-alphabet i    = c # lc (acolor i) # lw 0.05
+alphabet :: Int -> Diagram B
+alphabet (-1) = square 1 # lc red # lwG 0.05 # withEnvelope (circle 1 :: Diagram B)
+alphabet i    = c # lc (acolor i) # lwG 0.05
   where
     l  = length cs
     cs = [red, orange, yellow, green, blue, purple]
@@ -75,13 +73,13 @@ acolor i = cs !! (abs i `mod` l)
     l  = length cs
     cs = [red, orange, yellow, green, blue, purple]
 
-d :: D
+d :: Diagram B
 d = squared -- horizontal 
   where
     vsep = 0.1 
     hsep = 0.1
 
-    sweeping = (sweepLayout (Turn 1/2) $ map centerXY
+{-    sweeping = (sweepLayout (1/2 @@ turn) $ map centerXY
      [ block rs
      , sorting 7 head rs rs'
      , block rs'
@@ -91,44 +89,44 @@ d = squared -- horizontal
      , sorting 7 fst (zip p [1..]) (sortby (<=) (zip p [1..]))
      , block [[a,b,i] | (i,(a,b)) <- zip [1..] $ sortby (<=) (zip p [1..])]
      ]) === centerXY (threads n p)
- 
-    horizontal = hcat' def { sep = 1 } $ map centerXY 
+ -}
+    horizontal = hcat' (with & sep .~ 1) $ map centerXY 
      [ inputToBWT
      , bwtToRLE
      , reflectX bwtToRLE
      , bwtToInput
      ]
 
-    squared = vcat' def { sep = 2 } [ alignL top, translate (-2 & 0) $ alignL bottom ]
+    squared = vcat' (with & sep .~ 2) [ alignL top, translate ((-2) ^& 0) $ alignL bottom ]
       where
         top    = reflectY $ f [ inputToBWT, bwtToRLE ]
-        bottom = rotate (Turn 1/2) $ reflectY $ f
+        bottom = rotate (1/2 @@ turn) $ reflectY $ f
           [ reflectX bwtToRLE
           , bwtToInput
           ]
-        f ds = hcat' def { sep = 2 } (map centerXY $ ds)
+        f ds = hcat' (with & sep .~ 2) (map centerXY ds)
 
-    inputToBWT = hcat' def { sep = hsep } $ map centerXY
+    inputToBWT = hcat' (with & sep .~ hsep) $ map centerXY
       [ reflectX $ block rs  -- Rotations of s
       , sorting 7 head rs rs'
       , block rs' -- sorted rotations of s
       ]
 
-    buildUnbwt = hcat' def { sep = hsep } $ map centerXY
+    buildUnbwt = hcat' (with & sep .~ hsep) $ map centerXY
      [ reflectX $ block [[a,b] | (a,b) <- zip p [1..]]           -- spl table
      , sorting 23.1 fst (zip p [1..]) (sortby (<=) (zip p [1..]))
      , block [[a,b,i] | (i,(a,b)) <- zip [1..] $ sortby (<=) (zip p [1..])] -- continued
      ]
-    bwtToInput = hcat' def { sep = 7 } $ map alignB [ buildUnbwt, threads n p ]
+    bwtToInput = hcat' (with & sep .~ 7) $ map alignB [ buildUnbwt, threads n p ]
 
-    bwtToRLE = vcat' def { sep = vsep } $ map (hcat' def { sep = hsep} . map alphabet) $ groupBy (==) p
+    bwtToRLE = vcat' (with & sep .~ vsep) $ map (hcat' (with & sep .~ hsep) . map alphabet) $ groupBy (==) p
 
     tw = -2
-    threads n p =   alignL (hcat' def { sep = tw+2+hsep } (map (alphabet . snd) is)) 
-                === alignL ((reflectY $ hcat' def { sep = tw } $ take (length p * 2 - 1) ds))
+    threads n p =   alignL (hcat' (with & sep .~ tw+2+hsep) (map (alphabet . snd) is)) 
+                === alignL ((reflectY $ hcat' (with & sep .~ tw) $ take (length p * 2 - 1) ds))
       where
         (is,ds) = mconcat [ ([(i,x)],
-                              [ moveTo (0 & (fromIntegral i * (2+vsep))) (centerXY (block [[x,j]]))
+                              [ moveTo (0 ^& (fromIntegral i * (2+vsep))) (centerXY (block [[x,j]]))
 --                              , connect tw i j
                               ])
                      | (i,x,j) <- ts
@@ -139,16 +137,16 @@ d = squared -- horizontal
 
     
 
-    row = hcat' def { sep = hsep }
-    block = vcat' def { sep = vsep } . map (row . map alphabet)
+    row = hcat' (with & sep .~ hsep)
+    block = vcat' (with & sep .~ vsep) . map (row . map alphabet)
 
     sorting w f rs rs' = reflectY $ mconcat 
             [ connect w i j # lc (acolor (f r))
             | (i,r) <- zip [0..] rs
             , let j = fromJust . findIndex (== r) $ rs'
             ]
---    connect i j = (0 & f i) ~~ (5 & f j) # lw 0.2
-    connect w i j = bez (0 & f i) (w*2/5 & f i) (w*3/5 & f j) (w & f j) # lw 0.05
+--    connect i j = (0 ^& f i) ~~ (5 ^& f j) # lwG 0.2
+    connect w i j = bez (0 ^& f i) (w*2/5 ^& f i) (w*3/5 ^& f j) (w ^& f j) # lwG 0.05
       where
         f x = fromIntegral x * (2+vsep)
 
@@ -158,10 +156,10 @@ d = squared -- horizontal
     s = (-1) : map ((subtract (ord '0')) . ord) "101103107109113" -- This should be something more meaningful
     (n,p) = bwt s
 
-
+{-
 sweepLayout sweep ds = mconcat $ zipWith f ds (scanl (+) 0 ts)
   where
-    f d t = d # rotate (Turn 1/4) # alignL # moveTo (r & 0) # rotate t
+    f d t = d # rotate (1/4 @@ turn) # alignL # moveTo (r ^& 0) # rotate t
 
     r = total / (tau * getTurn sweep)
     l = fromIntegral $ length ds
@@ -172,12 +170,12 @@ sweepLayout sweep ds = mconcat $ zipWith f ds (scanl (+) 0 ts)
     ws = (wh / 2) : ((zipWith ave<*>tail) (drop 1 . take (length ds - 2) $ ws')) ++ [wl / 2]
     ave a b = (a + b) / 2
     total = sum ws
-    ts = map ((/(Turn total)) . (*sweep) . Turn) ws
-
+    ts = map ((/(total @@ turn)) . (*sweep) . Turn) ws
+-}
 bez a b c d = trailLike $ (fromSegments [bezier3 (b .-. a) (c .-. a) (d .-. a)]) `at` a
 
-d' :: D
-d' = vcat' def { sep = 0.1 } (map alphabet [0..10])
+d' :: Diagram B
+d' = vcat' (with & sep .~ 0.1) (map alphabet [0..10])
 
 main = defaultMain (d # centerXY # pad 1.1)
 -- main = defaultMain (sweepLayout (Turn 1/2) (map square [1,2,4,3,2,3,2,1,2]) # centerXY # pad 1.1)
