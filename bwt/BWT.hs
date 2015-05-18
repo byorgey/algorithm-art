@@ -5,16 +5,10 @@ import Diagrams.Prelude
 import Diagrams.Backend.SVG.CmdLine
 import Diagrams.Coordinates
 
-import Test.QuickCheck hiding ((===))
-
 import Data.Char
 import Data.List hiding (sort)
 import Data.Maybe
 import qualified Data.Map as M
-
-import Data.Default.Class
-
-import Debug.Trace
 
 
 -- Some parts from http://www.iis.sinica.edu.tw/~scm/pub/bwtJFP.pdf
