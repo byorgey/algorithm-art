@@ -10,6 +10,7 @@ import           Diagrams.Prelude             hiding (D)
 
 import           Data.Char                    (ord)
 import           Data.List                    (find, transpose)
+import           Data.Maybe                   (fromJust)
 import           Data.Tree                    (Tree (..))
 
 class Drawable a where
@@ -184,19 +185,19 @@ mergeForest' (MS (CallCarry t0 (I t1 ts1') (I t2 ts2')) stk)
 mergeForest' (MS (Result f) (AddO _ _ stk)) = MS (Result (O f)) stk
 mergeForest' (MS (Result f) (AddI _ _ t stk)) = MS (Result (I t f)) stk
 
-prop_mergeForest_dissected :: Ord a => BinomHeap a -> BinomHeap a -> Bool
-prop_mergeForest_dissected f1 f2 =
-  Just (mergeForest f1 f2) ==
-    (extract <$> find mergeDone (iterate mergeForest' (MS (CallMerge f1 f2) Top)))
-  where
-    mergeDone (MS (Result _) Top) = True
-    mergeDone _                   = False
-    extract (MS (Result f) Top)   = f
-    extract _                     = error "DON'T PANIC"
+-- prop_mergeForest_dissected :: Ord a => BinomHeap a -> BinomHeap a -> Bool
+-- prop_mergeForest_dissected f1 f2 =
+--   Just (mergeForest f1 f2) ==
+--     (extract <$> find mergeDone (iterate mergeForest' (MS (CallMerge f1 f2) Top)))
+--   where
+--     mergeDone (MS (Result _) Top) = True
+--     mergeDone _                   = False
+--     extract (MS (Result f) Top)   = f
+--     extract _                     = error "DON'T PANIC"
 
 ------------------------------------------------------------
 
-type D = Diagram SVG R2
+type D = Diagram SVG
 
 class RankToForest r where
   rankToForest :: r a -> [Tree a]
@@ -217,7 +218,7 @@ toForest (I t f) = Just (toTree t) : toForest f
 
 drawTree :: Drawable a => Tree a -> D
 drawTree (Node a ts)
-    = vcat' with {sep = treeSize}
+    = vsep treeSize
     [ draw a # setEnvelope mempty
     , children
     ]
@@ -228,7 +229,7 @@ drawTree (Node a ts)
       = ts
       # map (named () . drawTree)
       # reverse
-      # cat' unit_X with {sep = treeSize}
+      # cat' unit_X (with & sep .~ treeSize)
 
 drawBTree :: (Drawable a, RankToForest rank) => BinomTree rank a -> D
 drawBTree = drawTree . toTree
@@ -340,9 +341,9 @@ drawAddition grid = grid'
             # reverse
             # map (zipWith (\h -> (strutY h # alignT <>)) heights)
             # transpose
-            # map (alignR . hcat' with {sep = treeSize})
+            # map (alignR . hsep treeSize)
             # (\rows@[carries, add1, add2, res] ->
-                 vcat' with {sep = treeSize}
+                 vsep treeSize
                    [carries, add1, add2, hrule (maximum . map width $ rows) # alignR, res]
               )
     heights = foldl1 (zipWith max) (map (map height) grid1)
@@ -358,7 +359,7 @@ heaps2 = scanl (flip insert) Nil "Twinkle, twinkle, little star, how I wonder wh
 
 dia :: D
 dia
-  = vcat' with {sep = treeSize}
+  = vsep treeSize
   . map (drawForest . toForest)
   $ heaps1
 
@@ -381,5 +382,5 @@ enbox :: Colour Double -> Double -> D -> D
 enbox c padding d = centerXY d <> rect (width d + 2*padding) (height d + 2*padding) # lc c
 
 main :: IO ()
-main = defaultMain (visualizeMerge (heaps1 !! 38) (heaps2 !! 19) # centerXY # sized (Width 4) # pad 1.1)
+main = defaultMain ((drawTree . fromJust) ((toForest (heaps1 !! 38)) !! 2) # centerXY # frame 0.5)
 
